@@ -1,6 +1,6 @@
 # 🚀 69云自动签到助手
 
-本项目修改自[CMLiussss](https://github.com/cmliussss2024)大佬的项目[CF-Workers-checkin](https://github.com/cmliussss2024/CF-Workers-checkin。
+本项目修改自[CMLiussss](https://github.com/cmliussss2024)大佬的项目[CF-Workers-checkin](https://github.com/cmliussss2024/CF-Workers-checkin)
 
 原项目通过Cloudflare workers自动签到并将签到结果通过TGbot推送通知
 
