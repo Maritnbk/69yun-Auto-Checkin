@@ -1,11 +1,11 @@
 name: Daily Checkin
 
 # 触发条件
-on:
+于:
   schedule:
-    # 定时运行：每天北京时间上午 8:30 运行一次 (UTC 00:30)
+    # 定时运行：每天北京时间上午 10:30 运行一次 (UTC 02:30)
     # 这里的 cron 表达式使用 UTC 时间，+8 小时即为北京时间
-    - cron: '30 0 * * *'
+    - cron: '30 2 * * *'
   workflow_dispatch:
     # 支持在 GitHub 界面手动点击 "Run workflow" 触发执行
 
