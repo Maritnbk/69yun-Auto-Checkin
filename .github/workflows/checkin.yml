@@ -1,7 +1,7 @@
 name: Daily Checkin
 
 # 触发条件
-于:
+on:
   schedule:
     # 定时运行：每天北京时间上午 10:30 运行一次 (UTC 02:30)
     # 这里的 cron 表达式使用 UTC 时间，+8 小时即为北京时间
