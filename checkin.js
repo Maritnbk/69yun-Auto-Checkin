@@ -207,15 +207,8 @@ async function runCheckin() {
         log(`X ${error.message}`);
         console.error(message);
     } finally {
-        // 构建详细报告（含日志摘要）
-        const logSummary = capturedLogs.join('<br>');
-        const report = `
-            <b>账号:</b> ${CONFIG.user}<br>
-            <b>域名:</b> ${CONFIG.domain}<br>
-            <b>状态:</b> ${message}<br><br>
-            <b>执行日志:</b><br>${logSummary}
-        `;
-        await sendPushPlusNotification('每日签到报告', report);
+        const report = `<b>账号:</b> ${CONFIG.user}<br><b>域名:</b> ${CONFIG.domain}<br><b>签到结果:</b> ${message}`;
+        await sendPushPlusNotification('机场每日签到报告', report);
     }
 }
 
