@@ -3,39 +3,52 @@ name: Daily Checkin
 # 触发条件
 on:
   schedule:
-    # 定时运行：每天北京时间上午 8:30 运行一次 (UTC 00:30)
-    # 这里的 cron 表达式使用 UTC 时间，+8 小时即为北京时间
-    - cron: '30 0 * * *'
+    # 定时运行：北京时间 08:17 / 10:17 / 12:17 各一次（UTC 00:17 / 02:17 / 04:17）
+    #
+    # 为什么是三个时段：GitHub 托管 runner 的 schedule 事件会排队，实测延迟中位数
+    # 约 3.5 小时、最长超过 11 小时，单个时段无法保证在上午跑完。
+    # 脚本内部会识别"今日已签到"并视为幂等成功，多跑几次不会重复签到、也不会误报失败。
+    - cron: '17 0 * * *'   # 北京时间 08:17
+    - cron: '17 2 * * *'   # 北京时间 10:17
+    - cron: '17 4 * * *'   # 北京时间 12:17
   workflow_dispatch:
     # 支持在 GitHub 界面手动点击 "Run workflow" 触发执行
+
+# 最小权限：本工作流只需读取仓库内容
+permissions:
+  contents: read
+
+# 同一时刻只允许一个签到任务运行，避免手动触发与定时触发撞车
+concurrency:
+  group: checkin
+  cancel-in-progress: false
 
 jobs:
   checkin:
     runs-on: ubuntu-latest
-    
+    # 脚本内部有 240s 总预算（FLOW_BUDGET_MS），这里留出余量
+    timeout-minutes: 5
+
     steps:
       - name: 检出代码
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: 设置 Node.js 环境
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
-          # 如果你的项目有 package.json，可以开启缓存以加快速度
-          # cache: 'npm'
+          node-version: '22'
 
-      - name: 安装依赖
-        # 如果你只使用了内置的 fetch (Node 18+)，这一步可以省略
-        # 如果你有其他依赖，请取消下面行的注释
-        # run: npm install
-        run: echo "Using built-in fetch in Node 20"
+      - name: 语法检查
+        run: node --check checkin.js
 
       - name: 执行签到脚本
         env:
-          # 从 GitHub Secrets 中安全读取变量并映射为环境变量
-          DOMAIN: ${{ secrets.DOMAIN }}
-          USER: ${{ secrets.USER }}
-          PASS: ${{ secrets.PASS }}
+          # 推荐使用带 CHECKIN_ 前缀的变量名，避免与系统环境变量（如 USER）冲突
+          # 右侧表达式做了旧 Secret 名回退：新名字没配时自动取旧名字，
+          # 因此你可以先部署代码、再慢慢改 Secret，不会中断。
+          CHECKIN_DOMAIN: ${{ secrets.CHECKIN_DOMAIN || secrets.DOMAIN }}
+          CHECKIN_USER: ${{ secrets.CHECKIN_USER || secrets.USER }}
+          CHECKIN_PASS: ${{ secrets.CHECKIN_PASS || secrets.PASS }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           PUSHPLUS_TOPIC: ${{ secrets.PUSHPLUS_TOPIC }}
         run: node checkin.js
