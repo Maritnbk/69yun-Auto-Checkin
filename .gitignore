@@ -5,6 +5,9 @@ node_modules/
 config.json
 .env
 .env.local
+token.txt
+tokens.txt
+*.token.txt
 
 # 日志与临时文件
 *.log

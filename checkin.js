@@ -322,6 +322,75 @@ async function waitForSession(baseUrl, cookies, log) {
  * 执行一次完整的签到流程（登录 + 会话校验 + 签到）。
  * 成功返回结果文案；失败抛出 CheckinError，由上层决定是否整体重试。
  */
+/**
+ * 从签到/流量接口返回的 JSON 中提取剩余流量文案。
+ * SSPanel 系面板的签到响应通常自带 traffic / trafficInfo.unUsedTraffic，
+ * 但不同魔改版本字段不一，因此按优先级依次尝试多个字段。
+ * @param {object} data 接口返回的 JSON 对象
+ * @returns {string|null} 形如 '10.02GB' 的文案，取不到时返回 null
+ */
+function extractRemainingTraffic(data) {
+    if (!data || typeof data !== 'object') return null;
+
+    const candidates = [
+        data.traffic,
+        data.unUsedTraffic,
+        data.trafficInfo && data.trafficInfo.unUsedTraffic,
+        // 部分站点把剩余流量放在 arr 里（GET /gettraffic 的响应结构）
+        data.arr && data.arr.unUsedTraffic,
+        // unflowtraffic 是字节数，需自行格式化
+        typeof data.unflowtraffic === 'number' ? formatBytes(data.unflowtraffic) : null
+    ];
+
+    for (const value of candidates) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+        if (typeof value === 'number' && value >= 0) return formatBytes(value);
+    }
+    return null;
+}
+
+/** 把字节数格式化为人类可读的流量文案 */
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0) return null;
+    const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let value = bytes;
+    let i = 0;
+    while (value >= 1024 && i < units.length - 1) {
+        value /= 1024;
+        i++;
+    }
+    const digits = i === 0 ? 0 : 2;
+    return `${value.toFixed(digits)}${units[i]}`;
+}
+
+/**
+ * 尝试从签到响应之外的 /gettraffic 接口获取剩余流量（兜底）。
+ * 该请求失败不影响签到主流程，只让推送少一行。
+ */
+async function fetchRemainingTraffic(baseUrl, cookies) {
+    try {
+        const res = await fetchWithRetry(`${baseUrl}/gettraffic`, {
+            method: 'GET',
+            headers: {
+                'Cookie': cookieString(cookies),
+                'User-Agent': UA,
+                'Accept': 'application/json, text/plain, */*',
+                'Referer': `${baseUrl}/user`
+            }
+        }, { retries: 2 });
+
+        if (!res.ok) {
+            await discardBody(res);
+            return null;
+        }
+        const json = await readJson(res, '流量接口');
+        return extractRemainingTraffic(json);
+    } catch (err) {
+        console.warn(`获取剩余流量失败（不影响签到结果）: ${err.message}`);
+        return null;
+    }
+}
+
 async function runCheckinOnce(baseUrl, log) {
     // Step 1: 访问登录页获取初始 session Cookie
     log("访问站点获取初始会话...");
@@ -424,14 +493,20 @@ async function runCheckinOnce(baseUrl, log) {
 
     if (isSuccess) {
         const msg = `🎉 ${result.msg || '签到成功'}`;
+        // 优先用签到响应自带的流量字段，缺失时再查 /gettraffic
+        const traffic = extractRemainingTraffic(result)
+            || await fetchRemainingTraffic(baseUrl, allCookies);
         log(`签到结果: ${msg}`);
-        return msg;
+        if (traffic) log(`剩余流量: ${traffic}`);
+        return { msg, traffic };
     }
 
     if (isAlreadyCheckedIn) {
         // 幂等成功：今日已签到不是故障，多时段兜底重跑时会命中
         log(`签到结果: ✅ 今日已签到（无需重复）（站点提示: ${result.msg}）`);
-        return '✅ 今日已签到（无需重复）';
+        const traffic = extractRemainingTraffic(result)
+            || await fetchRemainingTraffic(baseUrl, allCookies);
+        return { msg: '✅ 今日已签到（无需重复）', traffic };
     }
 
     // 站点 msg 常自带"签到失败："前缀，避免拼出"签到失败: 签到失败：xxx"
@@ -446,12 +521,14 @@ async function runCheckinOnce(baseUrl, log) {
 async function runCheckin() {
     const log = (msg) => console.log(msg);
     let message = "";
+    let remainingTraffic = null;
     let failed = false;
 
     const buildReport = (msg) =>
         `<b>账号:</b> ${escapeHtml(maskAccount(CONFIG.user))}<br>` +
         `<b>域名:</b> ${escapeHtml(CONFIG.domain || '(未配置)')}<br>` +
-        `<b>签到结果:</b> ${escapeHtml(msg)}`;
+        `<b>签到结果:</b> ${escapeHtml(msg)}` +
+        (remainingTraffic ? `<br><b>剩余流量:</b> ${escapeHtml(remainingTraffic)}` : '');
 
     // 配置校验必须放在任何解引用之前，否则缺配置时会在 try 外崩溃、连通知都发不出去
     const missingKeys = ['domain', 'user', 'pass'].filter(key => !CONFIG[key]);
@@ -492,7 +569,9 @@ async function runCheckin() {
             }
 
             try {
-                message = await runCheckinOnce(baseUrl, log);
+                const outcome = await runCheckinOnce(baseUrl, log);
+                message = outcome.msg;
+                remainingTraffic = outcome.traffic;
                 log("✓ 签到流程完成");
                 break;
             } catch (error) {
